@@ -117,45 +117,6 @@ int compileAndLinkShaders()
     return shaderProgram;
 }
 
-// Create sphere vertices (simplified icosphere approach)
-vector<vec3> createSphere(float radius, vec3 color, int subdivisions = 2)
-{
-    vector<vec3> vertices;
-    
-    // Simple approach: create a cube and normalize vertices to make a sphere
-    float step = 2.0f / subdivisions;
-    
-    for (int i = 0; i <= subdivisions; ++i) {
-        for (int j = 0; j <= subdivisions; ++j) {
-            for (int k = 0; k < 6; ++k) { // 6 faces of cube
-                vec3 pos;
-                
-                if (k == 0) { // Front face
-                    pos = vec3(-1.0f + i * step, -1.0f + j * step, 1.0f);
-                } else if (k == 1) { // Back face
-                    pos = vec3(1.0f - i * step, -1.0f + j * step, -1.0f);
-                } else if (k == 2) { // Left face
-                    pos = vec3(-1.0f, -1.0f + i * step, 1.0f - j * step);
-                } else if (k == 3) { // Right face
-                    pos = vec3(1.0f, -1.0f + i * step, -1.0f + j * step);
-                } else if (k == 4) { // Top face
-                    pos = vec3(-1.0f + i * step, 1.0f, 1.0f - j * step);
-                } else { // Bottom face
-                    pos = vec3(-1.0f + i * step, -1.0f, -1.0f + j * step);
-                }
-                
-                // Normalize to make it spherical
-                pos = normalize(pos) * radius;
-                
-                vertices.push_back(pos);
-                vertices.push_back(color);
-            }
-        }
-    }
-    
-    return vertices;
-}
-
 // Simple sphere using triangulated approach
 vector<vec3> createSimpleSphere(float radius, vec3 color)
 {
