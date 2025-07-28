@@ -33,6 +33,8 @@ This is a basic 3D solar system simulation featuring:
 4. Run the C++ program
 5. Run the generated executable
 
+(g++ -std=c++11 -I/opt/homebrew/include -L/opt/homebrew/lib -framework OpenGL -lglfw -lGLEW solarsystem.cpp -o solarsystem) command for Yassine's Mac.
+
 ## Future Extensions
 
 - Add textures to planets
