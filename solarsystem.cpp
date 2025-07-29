@@ -33,6 +33,9 @@ float lastY = 300;
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
+// Orbit speed
+float orbitSpeedMultiplier = 1.0f;
+
 // Texture IDs
 GLuint sunTexture, mercuryTexture, venusTexture, earthTexture, marsTexture, jupiterTexture;
 GLuint saturnTexture, uranusTexture, neptuneTexture;
@@ -338,8 +341,8 @@ public:
     }
     
     void update(float deltaTime) {
-        currentOrbitAngle += orbitSpeed * deltaTime;
-        currentRotationAngle += rotationSpeed * deltaTime;
+        currentOrbitAngle += orbitSpeed * deltaTime * orbitSpeedMultiplier;
+        currentRotationAngle += rotationSpeed * deltaTime * orbitSpeedMultiplier;
     }
     
     mat4 getWorldMatrix() {
@@ -391,8 +394,8 @@ public:
     }
     
     void update(float deltaTime) {
-        currentOrbitAngle += orbitSpeed * deltaTime;
-        currentRotationAngle += rotationSpeed * deltaTime;
+        currentOrbitAngle += orbitSpeed * deltaTime * orbitSpeedMultiplier;
+        currentRotationAngle += rotationSpeed * deltaTime * orbitSpeedMultiplier;
         
         for (auto& moon : moons) {
             moon.update(deltaTime);
@@ -476,6 +479,15 @@ void processInput(GLFWwindow *window)
     if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || 
         glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
         speedMultiplier = 3.0f; // 3x faster when shift is held
+    }
+
+    // slow down orbit speed
+    if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || 
+        glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS) {
+        orbitSpeedMultiplier = 0.1f; // 10%
+    }
+    else {
+        orbitSpeedMultiplier = 1.0f; 
     }
     
     float cameraSpeed = 5.0f * deltaTime * speedMultiplier;
