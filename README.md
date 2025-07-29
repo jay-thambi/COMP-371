@@ -3,8 +3,8 @@
 ## Team Members
 
 - Yassine Hajou
-- Jay
-- Omar
+- Sanjay Thambithurai
+- Harun Slahaldin Omar
 
 ## Description
 
