@@ -8,12 +8,15 @@
 
 ## Description
 
-This is a basic 3D solar system simulation featuring:
+This is a complete 3D solar system simulation featuring:
 
-- A central star (Sun)
-- Planets of the solar system with an orbtital motion
-- Interactive camera controls
-- Relative Sizes
+- A central star (Sun) with texture
+- Planets of the solar system with orbital motion and textures
+- **Hierarchical Animation**: Moons orbiting planets (2-level deep hierarchy)
+- Interactive camera controls with relative movement
+- Realistic relative sizes and orbital speeds
+- Multiple textured surfaces with different textures
+- Advanced OpenGL features with shader-based rendering
 
 ## Camera Controls
 
@@ -35,11 +38,28 @@ This is a basic 3D solar system simulation featuring:
 
 (g++ -std=c++11 -I/opt/homebrew/include -L/opt/homebrew/lib -framework OpenGL -lglfw -lGLEW solarsystem.cpp -o solarsystem) command for Yassine's Mac.
 
-## Future Extensions
+## Features Implemented
 
-- Add textures to planets
-- Implement lighting system
-- Add moons to some planets
-- Add asteroid belt
-- Add more realistic planet scales and orbital speeds
-- Add planet names and information display
+✅ **Complete Assignment Requirements:**
+- Real-time 3D interactive application using OpenGL
+- Interactive camera with mouse + keyboard controls (flying/walking style)
+- Multiple textured surfaces with different textures
+- Hierarchical animation (sun→planet→moon, 2 levels deep)
+- Advanced OpenGL features with shader-based rendering
+
+## Solar System Details
+
+**Sun**: Central star with yellow texture
+**Planets**: Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune with unique textures
+**Moons**: 
+- Earth: 1 moon
+- Mars: 2 moons (Phobos, Deimos)
+- Jupiter: 4 Galilean moons
+
+## Technical Features
+
+- Texture mapping with stb_image.h
+- Hierarchical transformations for orbital mechanics
+- Fragment and vertex shaders with texture support
+- Realistic relative planet sizes and orbital speeds
+- Smooth camera controls with speed boost (Shift key)

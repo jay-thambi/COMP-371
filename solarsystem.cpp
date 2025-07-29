@@ -1,21 +1,20 @@
-//
-// COMP 371 Solar System Project
-// Basic Solar System with hierarchical animation
-//
-
 #include <iostream>
 #include <vector>
 #include <cmath>
+#include <string>
 
-#define GLEW_STATIC 1   // This allows linking with Static Library on Windows, without DLL
-#include <GL/glew.h>    // Include GLEW - OpenGL Extension Wrangler
+#define GLEW_STATIC 1   
+#include <GL/glew.h>    
 
-#include <GLFW/glfw3.h> // GLFW provides a cross-platform interface for creating a graphical context,
-                        // initializing OpenGL and binding inputs
+#include <GLFW/glfw3.h> 
+                      
 
-#include <glm/glm.hpp>  // GLM is an optimized math library with syntax to similar to OpenGL Shading Language
-#include <glm/gtc/matrix_transform.hpp> // include this to create transformation matrices
+#include <glm/glm.hpp>  
+#include <glm/gtc/matrix_transform.hpp> 
 #include <glm/common.hpp>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 using namespace glm;
 using namespace std;
@@ -34,21 +33,29 @@ float lastY = 300;
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
+// Texture IDs
+GLuint sunTexture, mercuryTexture, venusTexture, earthTexture, marsTexture, jupiterTexture;
+GLuint saturnTexture, uranusTexture, neptuneTexture;
+GLuint moonTexture, earthMoonTexture, marsMoonTexture, jupiterMoonTexture;
+
 const char* getVertexShaderSource()
 {
     return
                 "#version 330 core\n"
                 "layout (location = 0) in vec3 aPos;"
                 "layout (location = 1) in vec3 aColor;"
+                "layout (location = 2) in vec2 aTexCoord;"
                 ""
                 "uniform mat4 worldMatrix;"
                 "uniform mat4 viewMatrix = mat4(1.0);"
                 "uniform mat4 projectionMatrix = mat4(1.0);"
                 ""
                 "out vec3 vertexColor;"
+                "out vec2 TexCoord;"
                 "void main()"
                 "{"
                 "   vertexColor = aColor;"
+                "   TexCoord = aTexCoord;"
                 "   mat4 modelViewProjection = projectionMatrix * viewMatrix * worldMatrix;"
                 "   gl_Position = modelViewProjection * vec4(aPos.x, aPos.y, aPos.z, 1.0);"
                 "}";
@@ -59,22 +66,30 @@ const char* getFragmentShaderSource()
     return
                 "#version 330 core\n"
                 "in vec3 vertexColor;"
+                "in vec2 TexCoord;"
                 "out vec4 FragColor;"
+                ""
+                "uniform sampler2D texture1;"
+                "uniform bool useTexture;"
+                ""
                 "void main()"
                 "{"
-                "   FragColor = vec4(vertexColor.r, vertexColor.g, vertexColor.b, 1.0f);"
+                "   if (useTexture) {"
+                "       vec4 texColor = texture(texture1, TexCoord);"
+                "       FragColor = mix(texColor, vec4(vertexColor, 1.0), 0.3);"
+                "   } else {"
+                "       FragColor = vec4(vertexColor.r, vertexColor.g, vertexColor.b, 1.0f);"
+                "   }"
                 "}";
 }
 
 int compileAndLinkShaders()
 {
-    // vertex shader
     int vertexShader = glCreateShader(GL_VERTEX_SHADER);
     const char* vertexShaderSource = getVertexShaderSource();
     glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
     glCompileShader(vertexShader);
     
-    // check for shader compile errors
     int success;
     char infoLog[512];
     glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
@@ -84,13 +99,11 @@ int compileAndLinkShaders()
         std::cerr << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
     }
     
-    // fragment shader
     int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
     const char* fragmentShaderSource = getFragmentShaderSource();
     glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
     glCompileShader(fragmentShader);
     
-    // check for shader compile errors
     glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
     if (!success)
     {
@@ -98,13 +111,11 @@ int compileAndLinkShaders()
         std::cerr << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog << std::endl;
     }
     
-    // link shaders
     int shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vertexShader);
     glAttachShader(shaderProgram, fragmentShader);
     glLinkProgram(shaderProgram);
     
-    // check for linking errors
     glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
     if (!success) {
         glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
@@ -117,10 +128,40 @@ int compileAndLinkShaders()
     return shaderProgram;
 }
 
-// Simple sphere using triangulated approach
-vector<vec3> createSimpleSphere(float radius, vec3 color)
+GLuint loadTexture(const char* filename) {
+    GLuint textureID;
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_2D, textureID);
+    
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    
+    int width, height, nrChannels;
+    unsigned char *data = stbi_load(filename, &width, &height, &nrChannels, 0);
+    if (data) {
+        GLenum format = (nrChannels == 4) ? GL_RGBA : GL_RGB;
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        stbi_image_free(data);
+    } else {
+        std::cerr << "Failed to load texture: " << filename << std::endl;
+        unsigned char defaultTexture[] = {
+            255, 255, 255, 128, 128, 128, 255, 255, 255, 128, 128, 128,
+            128, 128, 128, 255, 255, 255, 128, 128, 128, 255, 255, 255,
+            255, 255, 255, 128, 128, 128, 255, 255, 255, 128, 128, 128,
+            128, 128, 128, 255, 255, 255, 128, 128, 128, 255, 255, 255
+        };
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4, 4, 0, GL_RGB, GL_UNSIGNED_BYTE, defaultTexture);
+    }
+    
+    return textureID;
+}
+
+vector<float> createTexturedSphere(float radius, vec3 color)
 {
-    vector<vec3> vertices;
+    vector<float> vertices;
     int segments = 20;
     int rings = 10;
     
@@ -154,58 +195,77 @@ vector<vec3> createSimpleSphere(float radius, vec3 color)
                 radius * sin(theta2) * sin(phi2)
             );
             
+            // Calculate texture coordinates
+            vec2 t1 = vec2((float)j / segments, (float)i / rings);
+            vec2 t2 = vec2((float)(j + 1) / segments, (float)i / rings);
+            vec2 t3 = vec2((float)j / segments, (float)(i + 1) / rings);
+            vec2 t4 = vec2((float)(j + 1) / segments, (float)(i + 1) / rings);
+            
             // First triangle
-            vertices.push_back(v1); vertices.push_back(color);
-            vertices.push_back(v2); vertices.push_back(color);
-            vertices.push_back(v3); vertices.push_back(color);
+            vertices.push_back(v1.x); vertices.push_back(v1.y); vertices.push_back(v1.z);
+            vertices.push_back(color.x); vertices.push_back(color.y); vertices.push_back(color.z);
+            vertices.push_back(t1.x); vertices.push_back(t1.y);
+            
+            vertices.push_back(v2.x); vertices.push_back(v2.y); vertices.push_back(v2.z);
+            vertices.push_back(color.x); vertices.push_back(color.y); vertices.push_back(color.z);
+            vertices.push_back(t2.x); vertices.push_back(t2.y);
+            
+            vertices.push_back(v3.x); vertices.push_back(v3.y); vertices.push_back(v3.z);
+            vertices.push_back(color.x); vertices.push_back(color.y); vertices.push_back(color.z);
+            vertices.push_back(t3.x); vertices.push_back(t3.y);
             
             // Second triangle
-            vertices.push_back(v2); vertices.push_back(color);
-            vertices.push_back(v4); vertices.push_back(color);
-            vertices.push_back(v3); vertices.push_back(color);
+            vertices.push_back(v2.x); vertices.push_back(v2.y); vertices.push_back(v2.z);
+            vertices.push_back(color.x); vertices.push_back(color.y); vertices.push_back(color.z);
+            vertices.push_back(t2.x); vertices.push_back(t2.y);
+            
+            vertices.push_back(v4.x); vertices.push_back(v4.y); vertices.push_back(v4.z);
+            vertices.push_back(color.x); vertices.push_back(color.y); vertices.push_back(color.z);
+            vertices.push_back(t4.x); vertices.push_back(t4.y);
+            
+            vertices.push_back(v3.x); vertices.push_back(v3.y); vertices.push_back(v3.z);
+            vertices.push_back(color.x); vertices.push_back(color.y); vertices.push_back(color.z);
+            vertices.push_back(t3.x); vertices.push_back(t3.y);
         }
     }
     
     return vertices;
 }
 
-int createSphereVBO(vector<vec3>& sphereVertices)
+int createTexturedSphereVBO(vector<float>& sphereVertices)
 {
-    // Create Vertex Buffer Object and Vertex Array Object
     GLuint VBO, VAO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     
-    // Bind the Vertex Array Object first
     glBindVertexArray(VAO);
     
-    // Bind and set vertex buffer
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sphereVertices.size() * sizeof(vec3), sphereVertices.data(), GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sphereVertices.size() * sizeof(float), sphereVertices.data(), GL_STATIC_DRAW);
     
-    // Position attribute
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
     
-    // Color attribute
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
+    
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
     
     return VAO;
 }
 
-// Create orbital path (circle) vertices
 vector<vec3> createOrbitPath(float radius)
 {
     vector<vec3> vertices;
-    int segments = 100; // Number of line segments for smooth circle
-    vec3 color = vec3(0.3f, 0.3f, 0.3f); // Much dimmer gray color for subtle orbit lines
+    int segments = 100;
+    vec3 color = vec3(0.3f, 0.3f, 0.3f); 
     
     for (int i = 0; i <= segments; ++i) {
         float angle = ((float)i / segments) * 2.0f * M_PI;
         vec3 position = vec3(
             radius * cos(angle),
-            0.0f,  // Keep orbit in XZ plane
+            0.0f,  
             radius * sin(angle)
         );
         vertices.push_back(position);
@@ -225,11 +285,9 @@ int createOrbitVBO(vector<vec3>& orbitVertices)
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, orbitVertices.size() * sizeof(vec3), orbitVertices.data(), GL_STATIC_DRAW);
     
-    // Position attribute
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
     
-    // Color attribute
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
     
@@ -257,7 +315,54 @@ void setWorldMatrix(int shaderProgram, mat4 worldMatrix)
     glUniformMatrix4fv(worldMatrixLocation, 1, GL_FALSE, &worldMatrix[0][0]);
 }
 
-// Planet class for hierarchical animation
+class Moon {
+public:
+    vec3 color;
+    float radius;
+    float orbitRadius;
+    float orbitSpeed;
+    float rotationSpeed;
+    float currentOrbitAngle;
+    float currentRotationAngle;
+    GLuint VAO;
+    int vertexCount;
+    GLuint textureID;
+    
+    Moon(vec3 c, float r, float orbitRad, float orbitSpd, float rotSpd, GLuint texID) 
+        : color(c), radius(r), orbitRadius(orbitRad), orbitSpeed(orbitSpd), rotationSpeed(rotSpd), 
+          currentOrbitAngle(0.0f), currentRotationAngle(0.0f), textureID(texID) {
+        
+        vector<float> vertices = createTexturedSphere(radius, color);
+        VAO = createTexturedSphereVBO(vertices);
+        vertexCount = vertices.size() / 8; 
+    }
+    
+    void update(float deltaTime) {
+        currentOrbitAngle += orbitSpeed * deltaTime;
+        currentRotationAngle += rotationSpeed * deltaTime;
+    }
+    
+    mat4 getWorldMatrix() {
+        mat4 orbitMatrix = rotate(mat4(1.0f), currentOrbitAngle, vec3(0.0f, 1.0f, 0.0f));
+        mat4 translateMatrix = translate(mat4(1.0f), vec3(orbitRadius, 0.0f, 0.0f));
+        mat4 rotationMatrix = rotate(mat4(1.0f), currentRotationAngle, vec3(0.0f, 1.0f, 0.0f));
+        
+        return orbitMatrix * translateMatrix * rotationMatrix;
+    }
+    
+    void draw(int shaderProgram) {
+        setWorldMatrix(shaderProgram, getWorldMatrix());
+        
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, textureID);
+        glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 1);
+        
+        glBindVertexArray(VAO);
+        glDrawArrays(GL_TRIANGLES, 0, vertexCount);
+    }
+};
+
 class Planet {
 public:
     vec3 color;
@@ -269,23 +374,32 @@ public:
     float currentRotationAngle;
     GLuint VAO;
     int vertexCount;
+    GLuint textureID;
+    vector<Moon> moons;
     
-    Planet(vec3 c, float r, float orbitRad, float orbitSpd, float rotSpd) 
+    Planet(vec3 c, float r, float orbitRad, float orbitSpd, float rotSpd, GLuint texID) 
         : color(c), radius(r), orbitRadius(orbitRad), orbitSpeed(orbitSpd), rotationSpeed(rotSpd), 
-          currentOrbitAngle(0.0f), currentRotationAngle(0.0f) {
+          currentOrbitAngle(0.0f), currentRotationAngle(0.0f), textureID(texID) {
         
-        vector<vec3> vertices = createSimpleSphere(radius, color);
-        VAO = createSphereVBO(vertices);
-        vertexCount = vertices.size() / 2; // Each vertex has position and color
+        vector<float> vertices = createTexturedSphere(radius, color);
+        VAO = createTexturedSphereVBO(vertices);
+        vertexCount = vertices.size() / 8;
+    }
+    
+    void addMoon(const Moon& moon) {
+        moons.push_back(moon);
     }
     
     void update(float deltaTime) {
         currentOrbitAngle += orbitSpeed * deltaTime;
         currentRotationAngle += rotationSpeed * deltaTime;
+        
+        for (auto& moon : moons) {
+            moon.update(deltaTime);
+        }
     }
     
     mat4 getWorldMatrix() {
-        // Hierarchical transformation: orbit then rotate
         mat4 orbitMatrix = rotate(mat4(1.0f), currentOrbitAngle, vec3(0.0f, 1.0f, 0.0f));
         mat4 translateMatrix = translate(mat4(1.0f), vec3(orbitRadius, 0.0f, 0.0f));
         mat4 rotationMatrix = rotate(mat4(1.0f), currentRotationAngle, vec3(0.0f, 1.0f, 0.0f));
@@ -294,13 +408,32 @@ public:
     }
     
     void draw(int shaderProgram) {
-        setWorldMatrix(shaderProgram, getWorldMatrix());
+        mat4 planetMatrix = getWorldMatrix();
+        setWorldMatrix(shaderProgram, planetMatrix);
+        
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, textureID);
+        glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 1);
+        
         glBindVertexArray(VAO);
         glDrawArrays(GL_TRIANGLES, 0, vertexCount);
+        
+        for (auto& moon : moons) {
+            mat4 moonMatrix = planetMatrix * moon.getWorldMatrix();
+            setWorldMatrix(shaderProgram, moonMatrix);
+            
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, moon.textureID);
+            glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
+            glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 1);
+            
+            glBindVertexArray(moon.VAO);
+            glDrawArrays(GL_TRIANGLES, 0, moon.vertexCount);
+        }
     }
 };
 
-// Mouse callback
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 {
     if (firstMouse)
@@ -311,7 +444,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
     }
 
     float xoffset = xpos - lastX;
-    float yoffset = lastY - ypos; // reversed since y-coordinates go from bottom to top
+    float yoffset = lastY - ypos; 
     lastX = xpos;
     lastY = ypos;
 
@@ -322,7 +455,6 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
     yaw += xoffset;
     pitch += yoffset;
 
-    // Make sure that when pitch is out of bounds, screen doesn't get flipped
     if (pitch > 89.0f)
         pitch = 89.0f;
     if (pitch < -89.0f)
@@ -335,13 +467,11 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
     cameraFront = normalize(front);
 }
 
-// Process input
 void processInput(GLFWwindow *window)
 {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    // Check if shift is pressed for faster movement
     float speedMultiplier = 1.0f;
     if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || 
         glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
@@ -361,7 +491,6 @@ void processInput(GLFWwindow *window)
 
 int main(int argc, char*argv[])
 {
-    // Initialize GLFW and OpenGL version
     glfwInit();
     
 #ifdef __APPLE__
@@ -371,7 +500,6 @@ int main(int argc, char*argv[])
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-    // Create Window and rendering context using GLFW
     GLFWwindow* window = glfwCreateWindow(800, 600, "Solar System", NULL, NULL);
     if (window == NULL)
     {
@@ -392,29 +520,55 @@ int main(int argc, char*argv[])
         return -1;
     }
     
-    // Enable depth test
     glEnable(GL_DEPTH_TEST);
     
-    // Compile and link shaders
     int shaderProgram = compileAndLinkShaders();
     
-    // Create the Sun (center star) - Much larger than planets
-    vector<vec3> sunVertices = createSimpleSphere(3.0f, vec3(1.0f, 1.0f, 0.0f)); // Yellow sun
-    GLuint sunVAO = createSphereVBO(sunVertices);
-    int sunVertexCount = sunVertices.size() / 2;
+    sunTexture = loadTexture("textures/sun.jpg");
+    mercuryTexture = loadTexture("textures/mercury.jpg");
+    venusTexture = loadTexture("textures/venus.jpg");
+    earthTexture = loadTexture("textures/earth.jpg");
+    marsTexture = loadTexture("textures/mars.jpg");
+    jupiterTexture = loadTexture("textures/jupiter.jpg");
+    saturnTexture = loadTexture("textures/saturn.jpg");
+    uranusTexture = loadTexture("textures/uranus.jpg");
+    neptuneTexture = loadTexture("textures/neptune.jpg");
+    moonTexture = loadTexture("textures/moon.jpg");
+    earthMoonTexture = loadTexture("textures/moon.jpg");
+    marsMoonTexture = loadTexture("textures/moon.jpg");
+    jupiterMoonTexture = loadTexture("textures/moon.jpg");
     
-    // Create planets with realistic relative scales (simplified but proportional)
-    // Real scale ratios: Sun=109, Jupiter=11, Earth=1, Venus=0.95, Mars=0.53, Mercury=0.38
-    // Scaled down for visibility: Sun=3.0, Jupiter=1.1, Earth=0.1, Venus=0.095, Mars=0.053, Mercury=0.038
-    // Orbital distances spaced out more for better visibility
+    vector<float> sunVertices = createTexturedSphere(3.0f, vec3(1.0f, 1.0f, 0.0f)); // Yellow sun
+    GLuint sunVAO = createTexturedSphereVBO(sunVertices);
+    int sunVertexCount = sunVertices.size() / 8;
+    
     vector<Planet> planets;
-    planets.push_back(Planet(vec3(0.7f, 0.4f, 0.2f), 0.038f, 6.0f, 2.0f, 3.0f));   // Mercury (smallest, fastest orbit)
-    planets.push_back(Planet(vec3(1.0f, 0.8f, 0.4f), 0.095f, 9.5f, 1.6f, 2.4f));   // Venus (similar to Earth size)
-    planets.push_back(Planet(vec3(0.2f, 0.6f, 1.0f), 0.1f, 13.0f, 1.2f, 2.0f));    // Earth (reference size)
-    planets.push_back(Planet(vec3(0.8f, 0.3f, 0.1f), 0.053f, 17.0f, 1.0f, 1.8f));  // Mars (about half Earth's size)
-    planets.push_back(Planet(vec3(0.9f, 0.7f, 0.5f), 1.1f, 25.0f, 0.6f, 1.2f));    // Jupiter (largest planet, much farther)
+    planets.push_back(Planet(vec3(0.7f, 0.4f, 0.2f), 0.038f, 6.0f, 2.0f, 3.0f, mercuryTexture));   // Mercury
+    planets.push_back(Planet(vec3(1.0f, 0.8f, 0.4f), 0.095f, 9.5f, 1.6f, 2.4f, venusTexture));     // Venus
+    planets.push_back(Planet(vec3(0.2f, 0.6f, 1.0f), 0.1f, 13.0f, 1.2f, 2.0f, earthTexture));      // Earth
+    planets.push_back(Planet(vec3(0.8f, 0.3f, 0.1f), 0.053f, 17.0f, 1.0f, 1.8f, marsTexture));     // Mars
+    planets.push_back(Planet(vec3(0.9f, 0.7f, 0.5f), 1.1f, 25.0f, 0.6f, 1.2f, jupiterTexture));    // Jupiter
+    planets.push_back(Planet(vec3(0.8f, 0.6f, 0.4f), 0.9f, 35.0f, 0.4f, 1.0f, saturnTexture));     // Saturn
+    planets.push_back(Planet(vec3(0.6f, 0.8f, 1.0f), 0.4f, 45.0f, 0.3f, 0.8f, uranusTexture));     // Uranus
+    planets.push_back(Planet(vec3(0.2f, 0.4f, 0.8f), 0.4f, 55.0f, 0.2f, 0.7f, neptuneTexture));    // Neptune
+
+    Moon earthMoon(vec3(0.8f, 0.8f, 0.8f), 0.025f, 0.3f, 4.0f, 2.5f, earthMoonTexture);
+    planets[2].addMoon(earthMoon); 
     
-    // Create orbital path rings for each planet
+    Moon marsMoon1(vec3(0.6f, 0.6f, 0.6f), 0.015f, 0.25f, 5.0f, 3.0f, marsMoonTexture);
+    Moon marsMoon2(vec3(0.5f, 0.5f, 0.5f), 0.012f, 0.4f, 3.5f, 2.8f, marsMoonTexture);
+    planets[3].addMoon(marsMoon1);
+    planets[3].addMoon(marsMoon2);
+    
+    Moon jupiterMoon1(vec3(0.9f, 0.9f, 0.9f), 0.08f, 0.8f, 2.0f, 1.5f, jupiterMoonTexture);
+    Moon jupiterMoon2(vec3(0.8f, 0.8f, 0.8f), 0.06f, 1.2f, 1.5f, 1.2f, jupiterMoonTexture);
+    Moon jupiterMoon3(vec3(0.7f, 0.7f, 0.7f), 0.05f, 1.6f, 1.2f, 1.0f, jupiterMoonTexture);
+    Moon jupiterMoon4(vec3(0.6f, 0.6f, 0.6f), 0.04f, 2.0f, 0.8f, 0.8f, jupiterMoonTexture);
+    planets[4].addMoon(jupiterMoon1);
+    planets[4].addMoon(jupiterMoon2);
+    planets[4].addMoon(jupiterMoon3);
+    planets[4].addMoon(jupiterMoon4);
+    
     vector<GLuint> orbitVAOs;
     vector<int> orbitVertexCounts;
     
@@ -425,57 +579,51 @@ int main(int argc, char*argv[])
         orbitVertexCounts.push_back(orbitVertices.size() / 2);
     }
     
-    // Set up view and projection matrices
     mat4 projectionMatrix = perspective(radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
     setProjectionMatrix(shaderProgram, projectionMatrix);
     
-    // Rendering Loop
     while(!glfwWindowShouldClose(window))
     {
-        // Calculate deltatime
         float currentFrame = glfwGetTime();
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
         
-        // Process input
         processInput(window);
         
-        // Background Fill Color
         glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         
         glUseProgram(shaderProgram);
         
-        // Set view matrix
         mat4 viewMatrix = lookAt(cameraPosition, cameraPosition + cameraFront, cameraUp);
         setViewMatrix(shaderProgram, viewMatrix);
         
-        // Draw the Sun at center
         setWorldMatrix(shaderProgram, mat4(1.0f));
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, sunTexture);
+        glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 1);
         glBindVertexArray(sunVAO);
         glDrawArrays(GL_TRIANGLES, 0, sunVertexCount);
         
-        // Draw orbital paths (subtle gray circles)
-        glLineWidth(1.0f); // Set thin line width for orbital paths
+        glLineWidth(1.0f); 
+        glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 0); 
         for (int i = 0; i < orbitVAOs.size(); ++i) {
-            setWorldMatrix(shaderProgram, mat4(1.0f)); // Identity matrix for orbits centered at origin
+            setWorldMatrix(shaderProgram, mat4(1.0f));
             glBindVertexArray(orbitVAOs[i]);
             glDrawArrays(GL_LINE_LOOP, 0, orbitVertexCounts[i]);
         }
-        glLineWidth(1.0f); // Reset line width
+        glLineWidth(1.0f); 
         
-        // Update and draw planets
         for (auto& planet : planets) {
             planet.update(deltaTime);
             planet.draw(shaderProgram);
         }
         
-        // End frame
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
     
-    // Shutdown GLFW
     glfwTerminate();
     
     return 0;
