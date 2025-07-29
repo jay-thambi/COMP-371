@@ -3,7 +3,7 @@
 ## Team Members
 
 - Yassine Hajou
-- Sanjay Thambithurai
+- Sanjay Thambithurai (40184405)
 - Harun Slahaldin Omar
 
 ## Description
@@ -41,7 +41,7 @@ This is a complete 3D solar system simulation featuring:
 
 ## Features Implemented
 
-✅ **Complete Assignment Requirements:**
+**Complete Assignment Requirements:**
 - Real-time 3D interactive application using OpenGL
 - Interactive camera with mouse + keyboard controls (flying/walking style)
 - Multiple textured surfaces with different textures
