@@ -25,7 +25,8 @@ This is a complete 3D solar system simulation featuring:
 - **S**: Move backward
 - **A**: Move left
 - **D**: Move right
-- **Shift**: Speed Up 300%
+- **Shift**: Speed Up Movement 300%
+- **CTRL**: Slow orbit to 10%
 - **ESC**: Exit application
 
 ## Build Instructions
