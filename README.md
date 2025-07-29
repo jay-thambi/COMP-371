@@ -2,7 +2,7 @@
 
 ## Team Members
 
-- Yassine Hajou
+- Yassine Hajou (40284609)
 - Sanjay Thambithurai (40184405)
 - Harun Slahaldin Omar
 
