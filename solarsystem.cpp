@@ -20,7 +20,7 @@ using namespace glm;
 using namespace std;
 
 // Camera variables
-vec3 cameraPosition = vec3(0.0f, 5.0f, 20.0f);
+vec3 cameraPosition = vec3(0.0f, 10.0f, 40.0f); // Start further back to see the expanded solar system
 vec3 cameraFront = vec3(0.0f, 0.0f, -1.0f);
 vec3 cameraUp = vec3(0.0f, 1.0f, 0.0f);
 float yaw = -90.0f;
@@ -45,22 +45,28 @@ const char* getVertexShaderSource()
 {
     return
                 "#version 330 core\n"
-                "layout (location = 0) in vec3 aPos;"
-                "layout (location = 1) in vec3 aColor;"
-                "layout (location = 2) in vec2 aTexCoord;"
-                ""
-                "uniform mat4 worldMatrix;"
-                "uniform mat4 viewMatrix = mat4(1.0);"
-                "uniform mat4 projectionMatrix = mat4(1.0);"
-                ""
-                "out vec3 vertexColor;"
-                "out vec2 TexCoord;"
-                "void main()"
-                "{"
-                "   vertexColor = aColor;"
-                "   TexCoord = aTexCoord;"
-                "   mat4 modelViewProjection = projectionMatrix * viewMatrix * worldMatrix;"
-                "   gl_Position = modelViewProjection * vec4(aPos.x, aPos.y, aPos.z, 1.0);"
+                "layout (location = 0) in vec3 aPos;\n"
+                "layout (location = 1) in vec3 aColor;\n"
+                "layout (location = 2) in vec2 aTexCoord;\n"
+                "layout (location = 3) in vec3 aNormal;\n"
+                "\n"
+                "uniform mat4 worldMatrix;\n"
+                "uniform mat4 viewMatrix = mat4(1.0);\n"
+                "uniform mat4 projectionMatrix = mat4(1.0);\n"
+                "\n"
+                "out vec3 vertexColor;\n"
+                "out vec2 TexCoord;\n"
+                "out vec3 FragPos;\n"
+                "out vec3 Normal;\n"
+                "\n"
+                "void main()\n"
+                "{\n"
+                "   vertexColor = aColor;\n"
+                "   TexCoord = aTexCoord;\n"
+                "   FragPos = vec3(worldMatrix * vec4(aPos, 1.0));\n"
+                "   Normal = mat3(transpose(inverse(worldMatrix))) * aNormal;\n"
+                "   mat4 modelViewProjection = projectionMatrix * viewMatrix * worldMatrix;\n"
+                "   gl_Position = modelViewProjection * vec4(aPos.x, aPos.y, aPos.z, 1.0);\n"
                 "}";
 }
 
@@ -68,21 +74,63 @@ const char* getFragmentShaderSource()
 {
     return
                 "#version 330 core\n"
-                "in vec3 vertexColor;"
-                "in vec2 TexCoord;"
-                "out vec4 FragColor;"
-                ""
-                "uniform sampler2D texture1;"
-                "uniform bool useTexture;"
-                ""
-                "void main()"
-                "{"
-                "   if (useTexture) {"
-                "       vec4 texColor = texture(texture1, TexCoord);"
-                "       FragColor = mix(texColor, vec4(vertexColor, 1.0), 0.3);"
-                "   } else {"
-                "       FragColor = vec4(vertexColor.r, vertexColor.g, vertexColor.b, 1.0f);"
-                "   }"
+                "in vec3 vertexColor;\n"
+                "in vec2 TexCoord;\n"
+                "in vec3 FragPos;\n"
+                "in vec3 Normal;\n"
+                "out vec4 FragColor;\n"
+                "\n"
+                "uniform sampler2D texture1;\n"
+                "uniform bool useTexture;\n"
+                "uniform bool useLighting;\n"
+                "uniform bool isSun;\n"           // New uniform to identify the sun
+                "uniform vec3 lightPos;\n"      // Sun position (0,0,0)
+                "uniform vec3 lightColor;\n"    // Sun light color
+                "uniform vec3 viewPos;\n"       // Camera position
+                "\n"
+                "void main()\n"
+                "{\n"
+                "   vec3 color;\n"
+                "   if (useTexture) {\n"
+                "       vec4 texColor = texture(texture1, TexCoord);\n"
+                "       color = mix(texColor.rgb, vertexColor, 0.3);\n"
+                "   } else {\n"
+                "       color = vertexColor;\n"
+                "   }\n"
+                "\n"
+                "   // Make the sun glow and emit light\n"
+                "   if (isSun) {\n"
+                "       // Sun emits bright light - make it glow\n"
+                "       float glow = 1.5 + 0.3 * sin(gl_FragCoord.x * 0.01) * cos(gl_FragCoord.y * 0.01);\n"
+                "       color = color * glow;\n"
+                "       // Add bright yellow/orange glow effect\n"
+                "       color = mix(color, vec3(1.0, 0.9, 0.6), 0.3);\n"
+                "       FragColor = vec4(color, 1.0);\n"
+                "       return;\n"
+                "   }\n"
+                "\n"
+                "   if (useLighting) {\n"
+                "       // Ambient lighting (base illumination)\n"
+                "       vec3 ambient = 0.15 * lightColor;\n"
+                "\n"
+                "       // Diffuse lighting (surface facing light)\n"
+                "       vec3 norm = normalize(Normal);\n"
+                "       vec3 lightDir = normalize(lightPos - FragPos);\n"
+                "       float diff = max(dot(norm, lightDir), 0.0);\n"
+                "       vec3 diffuse = diff * lightColor;\n"
+                "\n"
+                "       // Specular lighting (shiny reflections)\n"
+                "       vec3 viewDir = normalize(viewPos - FragPos);\n"
+                "       vec3 reflectDir = reflect(-lightDir, norm);\n"
+                "       float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);\n"
+                "       vec3 specular = spec * lightColor * 0.3;\n"
+                "\n"
+                "       // Combine all lighting components\n"
+                "       vec3 lighting = ambient + diffuse + specular;\n"
+                "       color = color * lighting;\n"
+                "   }\n"
+                "\n"
+                "   FragColor = vec4(color, 1.0);\n"
                 "}";
 }
 
@@ -198,37 +246,55 @@ vector<float> createTexturedSphere(float radius, vec3 color)
                 radius * sin(theta2) * sin(phi2)
             );
             
+            // Calculate normals (for sphere, normal = normalized position)
+            vec3 n1 = normalize(v1);
+            vec3 n2 = normalize(v2);
+            vec3 n3 = normalize(v3);
+            vec3 n4 = normalize(v4);
+            
             // Calculate texture coordinates
             vec2 t1 = vec2((float)j / segments, (float)i / rings);
             vec2 t2 = vec2((float)(j + 1) / segments, (float)i / rings);
             vec2 t3 = vec2((float)j / segments, (float)(i + 1) / rings);
             vec2 t4 = vec2((float)(j + 1) / segments, (float)(i + 1) / rings);
             
-            // First triangle
+            // First triangle: v1, v2, v3
+            // Vertex 1: position(3) + color(3) + texcoord(2) + normal(3) = 11 floats
             vertices.push_back(v1.x); vertices.push_back(v1.y); vertices.push_back(v1.z);
             vertices.push_back(color.x); vertices.push_back(color.y); vertices.push_back(color.z);
             vertices.push_back(t1.x); vertices.push_back(t1.y);
+            vertices.push_back(n1.x); vertices.push_back(n1.y); vertices.push_back(n1.z);
             
+            // Vertex 2
             vertices.push_back(v2.x); vertices.push_back(v2.y); vertices.push_back(v2.z);
             vertices.push_back(color.x); vertices.push_back(color.y); vertices.push_back(color.z);
             vertices.push_back(t2.x); vertices.push_back(t2.y);
+            vertices.push_back(n2.x); vertices.push_back(n2.y); vertices.push_back(n2.z);
             
+            // Vertex 3
             vertices.push_back(v3.x); vertices.push_back(v3.y); vertices.push_back(v3.z);
             vertices.push_back(color.x); vertices.push_back(color.y); vertices.push_back(color.z);
             vertices.push_back(t3.x); vertices.push_back(t3.y);
+            vertices.push_back(n3.x); vertices.push_back(n3.y); vertices.push_back(n3.z);
             
-            // Second triangle
+            // Second triangle: v2, v4, v3
+            // Vertex 2
             vertices.push_back(v2.x); vertices.push_back(v2.y); vertices.push_back(v2.z);
             vertices.push_back(color.x); vertices.push_back(color.y); vertices.push_back(color.z);
             vertices.push_back(t2.x); vertices.push_back(t2.y);
+            vertices.push_back(n2.x); vertices.push_back(n2.y); vertices.push_back(n2.z);
             
+            // Vertex 4
             vertices.push_back(v4.x); vertices.push_back(v4.y); vertices.push_back(v4.z);
             vertices.push_back(color.x); vertices.push_back(color.y); vertices.push_back(color.z);
             vertices.push_back(t4.x); vertices.push_back(t4.y);
+            vertices.push_back(n4.x); vertices.push_back(n4.y); vertices.push_back(n4.z);
             
+            // Vertex 3
             vertices.push_back(v3.x); vertices.push_back(v3.y); vertices.push_back(v3.z);
             vertices.push_back(color.x); vertices.push_back(color.y); vertices.push_back(color.z);
             vertices.push_back(t3.x); vertices.push_back(t3.y);
+            vertices.push_back(n3.x); vertices.push_back(n3.y); vertices.push_back(n3.z);
         }
     }
     
@@ -246,14 +312,21 @@ int createTexturedSphereVBO(vector<float>& sphereVertices)
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, sphereVertices.size() * sizeof(float), sphereVertices.data(), GL_STATIC_DRAW);
     
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    // Position attribute (location 0)
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
     
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+    // Color attribute (location 1)
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
     
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+    // Texture coordinate attribute (location 2)
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(6 * sizeof(float)));
     glEnableVertexAttribArray(2);
+    
+    // Normal attribute (location 3)
+    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(8 * sizeof(float)));
+    glEnableVertexAttribArray(3);
     
     return VAO;
 }
@@ -337,7 +410,7 @@ public:
         
         vector<float> vertices = createTexturedSphere(radius, color);
         VAO = createTexturedSphereVBO(vertices);
-        vertexCount = vertices.size() / 8; 
+        vertexCount = vertices.size() / 11; // Now 11 floats per vertex
     }
     
     void update(float deltaTime) {
@@ -360,6 +433,7 @@ public:
         glBindTexture(GL_TEXTURE_2D, textureID);
         glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
         glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 1);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), 1);
         
         glBindVertexArray(VAO);
         glDrawArrays(GL_TRIANGLES, 0, vertexCount);
@@ -386,7 +460,7 @@ public:
         
         vector<float> vertices = createTexturedSphere(radius, color);
         VAO = createTexturedSphereVBO(vertices);
-        vertexCount = vertices.size() / 8;
+        vertexCount = vertices.size() / 11;
     }
     
     void addMoon(const Moon& moon) {
@@ -418,6 +492,7 @@ public:
         glBindTexture(GL_TEXTURE_2D, textureID);
         glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
         glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 1);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), 1);
         
         glBindVertexArray(VAO);
         glDrawArrays(GL_TRIANGLES, 0, vertexCount);
@@ -430,6 +505,7 @@ public:
             glBindTexture(GL_TEXTURE_2D, moon.textureID);
             glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
             glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 1);
+            glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), 1);
             
             glBindVertexArray(moon.VAO);
             glDrawArrays(GL_TRIANGLES, 0, moon.vertexCount);
@@ -478,19 +554,19 @@ void processInput(GLFWwindow *window)
     float speedMultiplier = 1.0f;
     if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || 
         glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
-        speedMultiplier = 3.0f; // 3x faster when shift is held
+        speedMultiplier = 5.0f; 
     }
 
     // slow down orbit speed
     if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || 
         glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS) {
-        orbitSpeedMultiplier = 0.1f; // 10%
+        orbitSpeedMultiplier = 0.1f; 
     }
     else {
         orbitSpeedMultiplier = 1.0f; 
     }
     
-    float cameraSpeed = 5.0f * deltaTime * speedMultiplier;
+    float cameraSpeed = 15.0f * deltaTime * speedMultiplier;
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
         cameraPosition += cameraSpeed * cameraFront;
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
@@ -499,6 +575,8 @@ void processInput(GLFWwindow *window)
         cameraPosition -= normalize(cross(cameraFront, cameraUp)) * cameraSpeed;
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
         cameraPosition += normalize(cross(cameraFront, cameraUp)) * cameraSpeed;
+    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+        cameraPosition += cameraSpeed * cameraUp;
 }
 
 int main(int argc, char*argv[])
@@ -550,32 +628,32 @@ int main(int argc, char*argv[])
     marsMoonTexture = loadTexture("textures/moon.jpg");
     jupiterMoonTexture = loadTexture("textures/moon.jpg");
     
-    vector<float> sunVertices = createTexturedSphere(3.0f, vec3(1.0f, 1.0f, 0.0f)); // Yellow sun
+    vector<float> sunVertices = createTexturedSphere(9.0f, vec3(1.0f, 1.0f, 0.0f)); 
     GLuint sunVAO = createTexturedSphereVBO(sunVertices);
-    int sunVertexCount = sunVertices.size() / 8;
+    int sunVertexCount = sunVertices.size() / 11; 
     
     vector<Planet> planets;
-    planets.push_back(Planet(vec3(0.7f, 0.4f, 0.2f), 0.038f, 6.0f, 2.0f, 3.0f, mercuryTexture));   // Mercury
-    planets.push_back(Planet(vec3(1.0f, 0.8f, 0.4f), 0.095f, 9.5f, 1.6f, 2.4f, venusTexture));     // Venus
-    planets.push_back(Planet(vec3(0.2f, 0.6f, 1.0f), 0.1f, 13.0f, 1.2f, 2.0f, earthTexture));      // Earth
-    planets.push_back(Planet(vec3(0.8f, 0.3f, 0.1f), 0.053f, 17.0f, 1.0f, 1.8f, marsTexture));     // Mars
-    planets.push_back(Planet(vec3(0.9f, 0.7f, 0.5f), 1.1f, 25.0f, 0.6f, 1.2f, jupiterTexture));    // Jupiter
-    planets.push_back(Planet(vec3(0.8f, 0.6f, 0.4f), 0.9f, 35.0f, 0.4f, 1.0f, saturnTexture));     // Saturn
-    planets.push_back(Planet(vec3(0.6f, 0.8f, 1.0f), 0.4f, 45.0f, 0.3f, 0.8f, uranusTexture));     // Uranus
-    planets.push_back(Planet(vec3(0.2f, 0.4f, 0.8f), 0.4f, 55.0f, 0.2f, 0.7f, neptuneTexture));    // Neptune
+    planets.push_back(Planet(vec3(0.7f, 0.4f, 0.2f), 0.114f, 12.0f, 0.5f, 3.0f, mercuryTexture)); 
+    planets.push_back(Planet(vec3(1.0f, 0.8f, 0.4f), 0.285f, 19.0f, 0.4f, 2.4f, venusTexture));  
+    planets.push_back(Planet(vec3(0.2f, 0.6f, 1.0f), 0.3f, 26.0f, 0.3f, 2.0f, earthTexture)); 
+    planets.push_back(Planet(vec3(0.8f, 0.3f, 0.1f), 0.159f, 34.0f, 0.25f, 1.8f, marsTexture));   
+    planets.push_back(Planet(vec3(0.9f, 0.7f, 0.5f), 3.3f, 50.0f, 0.15f, 1.2f, jupiterTexture));   
+    planets.push_back(Planet(vec3(0.8f, 0.6f, 0.4f), 2.7f, 70.0f, 0.1f, 1.0f, saturnTexture));    
+    planets.push_back(Planet(vec3(0.6f, 0.8f, 1.0f), 1.2f, 90.0f, 0.075f, 0.8f, uranusTexture));  
+    planets.push_back(Planet(vec3(0.2f, 0.4f, 0.8f), 1.2f, 110.0f, 0.05f, 0.7f, neptuneTexture)); 
 
-    Moon earthMoon(vec3(0.8f, 0.8f, 0.8f), 0.025f, 0.3f, 4.0f, 2.5f, earthMoonTexture);
+    Moon earthMoon(vec3(0.8f, 0.8f, 0.8f), 0.075f, 0.3f, 1.0f, 2.5f, earthMoonTexture);
     planets[2].addMoon(earthMoon); 
     
-    Moon marsMoon1(vec3(0.6f, 0.6f, 0.6f), 0.015f, 0.25f, 5.0f, 3.0f, marsMoonTexture);
-    Moon marsMoon2(vec3(0.5f, 0.5f, 0.5f), 0.012f, 0.4f, 3.5f, 2.8f, marsMoonTexture);
+    Moon marsMoon1(vec3(0.6f, 0.6f, 0.6f), 0.045f, 0.25f, 1.25f, 3.0f, marsMoonTexture); 
+    Moon marsMoon2(vec3(0.5f, 0.5f, 0.5f), 0.036f, 0.4f, 0.875f, 2.8f, marsMoonTexture); 
     planets[3].addMoon(marsMoon1);
     planets[3].addMoon(marsMoon2);
     
-    Moon jupiterMoon1(vec3(0.9f, 0.9f, 0.9f), 0.08f, 0.8f, 2.0f, 1.5f, jupiterMoonTexture);
-    Moon jupiterMoon2(vec3(0.8f, 0.8f, 0.8f), 0.06f, 1.2f, 1.5f, 1.2f, jupiterMoonTexture);
-    Moon jupiterMoon3(vec3(0.7f, 0.7f, 0.7f), 0.05f, 1.6f, 1.2f, 1.0f, jupiterMoonTexture);
-    Moon jupiterMoon4(vec3(0.6f, 0.6f, 0.6f), 0.04f, 2.0f, 0.8f, 0.8f, jupiterMoonTexture);
+    Moon jupiterMoon1(vec3(0.9f, 0.9f, 0.9f), 0.24f, 0.8f, 0.5f, 1.5f, jupiterMoonTexture); 
+    Moon jupiterMoon2(vec3(0.8f, 0.8f, 0.8f), 0.18f, 1.2f, 0.375f, 1.2f, jupiterMoonTexture); 
+    Moon jupiterMoon3(vec3(0.7f, 0.7f, 0.7f), 0.15f, 1.6f, 0.3f, 1.0f, jupiterMoonTexture);
+    Moon jupiterMoon4(vec3(0.6f, 0.6f, 0.6f), 0.12f, 2.0f, 0.2f, 0.8f, jupiterMoonTexture);
     planets[4].addMoon(jupiterMoon1);
     planets[4].addMoon(jupiterMoon2);
     planets[4].addMoon(jupiterMoon3);
@@ -591,7 +669,7 @@ int main(int argc, char*argv[])
         orbitVertexCounts.push_back(orbitVertices.size() / 2);
     }
     
-    mat4 projectionMatrix = perspective(radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
+    mat4 projectionMatrix = perspective(radians(45.0f), 800.0f / 600.0f, 0.1f, 250.0f);
     setProjectionMatrix(shaderProgram, projectionMatrix);
     
     while(!glfwWindowShouldClose(window))
@@ -607,6 +685,13 @@ int main(int argc, char*argv[])
         
         glUseProgram(shaderProgram);
         
+        vec3 lightPos = vec3(0.0f, 0.0f, 0.0f);
+        vec3 lightColor = vec3(1.0f, 1.0f, 0.9f);  
+        
+        glUniform3fv(glGetUniformLocation(shaderProgram, "lightPos"), 1, &lightPos[0]);
+        glUniform3fv(glGetUniformLocation(shaderProgram, "lightColor"), 1, &lightColor[0]);
+        glUniform3fv(glGetUniformLocation(shaderProgram, "viewPos"), 1, &cameraPosition[0]);
+        
         mat4 viewMatrix = lookAt(cameraPosition, cameraPosition + cameraFront, cameraUp);
         setViewMatrix(shaderProgram, viewMatrix);
         
@@ -615,11 +700,16 @@ int main(int argc, char*argv[])
         glBindTexture(GL_TEXTURE_2D, sunTexture);
         glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
         glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 1);
+        glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), 0);  
+        glUniform1i(glGetUniformLocation(shaderProgram, "isSun"), 1); 
         glBindVertexArray(sunVAO);
         glDrawArrays(GL_TRIANGLES, 0, sunVertexCount);
         
+
         glLineWidth(1.0f); 
         glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 0); 
+        glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), 0); 
+        glUniform1i(glGetUniformLocation(shaderProgram, "isSun"), 0); 
         for (int i = 0; i < orbitVAOs.size(); ++i) {
             setWorldMatrix(shaderProgram, mat4(1.0f));
             glBindVertexArray(orbitVAOs[i]);
@@ -629,7 +719,36 @@ int main(int argc, char*argv[])
         
         for (auto& planet : planets) {
             planet.update(deltaTime);
-            planet.draw(shaderProgram);
+            
+
+            mat4 planetMatrix = planet.getWorldMatrix();
+            setWorldMatrix(shaderProgram, planetMatrix);
+            
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, planet.textureID);
+            glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
+            glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 1);
+            glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), 1);
+            glUniform1i(glGetUniformLocation(shaderProgram, "isSun"), 0);
+            
+            glBindVertexArray(planet.VAO);
+            glDrawArrays(GL_TRIANGLES, 0, planet.vertexCount);
+            
+            // Draw moons with same lighting setting
+            for (auto& moon : planet.moons) {
+                mat4 moonMatrix = planetMatrix * moon.getWorldMatrix();
+                setWorldMatrix(shaderProgram, moonMatrix);
+                
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, moon.textureID);
+                glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
+                glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 1);
+                glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), 1);
+                glUniform1i(glGetUniformLocation(shaderProgram, "isSun"), 0);
+                
+                glBindVertexArray(moon.VAO);
+                glDrawArrays(GL_TRIANGLES, 0, moon.vertexCount);
+            }
         }
         
         glfwSwapBuffers(window);
