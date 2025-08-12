@@ -15,6 +15,7 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+#include <algorithm>
 
 using namespace glm;
 using namespace std;
@@ -22,7 +23,7 @@ using namespace std;
 const int WINDOW_WIDTH = 1024;
 const int WINDOW_HEIGHT = 768;
 const int STAR_COUNT = 50000;
-const float STAR_FIELD_RADIUS = 200.0f;
+const float STAR_FIELD_RADIUS = 4000.0f;
 vec3 cameraPosition = vec3(0.0f, 10.0f, 40.0f);
 vec3 cameraFront = vec3(0.0f, 0.0f, -1.0f);
 vec3 cameraUp = vec3(0.0f, 1.0f, 0.0f);
@@ -31,6 +32,9 @@ float pitch = 0.0f;
 bool firstMouse = true;
 float lastX = WINDOW_WIDTH / 2.0f;
 float lastY = WINDOW_HEIGHT / 2.0f;
+const int SHOOTING_STAR_COUNT = 20;  
+const float SHOOTING_STAR_SPEED = 50.0f;  
+const float SHOOTING_STAR_LENGTH = 5.0f;  
 
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
@@ -40,9 +44,22 @@ float orbitSpeedMultiplier = 1.0f;
 GLuint sunTexture, mercuryTexture, venusTexture, earthTexture, marsTexture, jupiterTexture;
 GLuint saturnTexture, uranusTexture, neptuneTexture;
 GLuint moonTexture;
+GLuint ringTexture;
 
 GLuint starfieldVAO;
 int starfieldVertexCount;
+
+GLuint shootingStarVAO, shootingStarVBO;
+
+struct ShootingStar {
+    vec3 position;
+    vec3 direction;
+    vec3 color;
+    float speed;
+    float lifetime;
+    float maxLifetime;
+};
+vector<ShootingStar> shootingStars;
 
 const char* getVertexShaderSource()
 {
@@ -171,6 +188,28 @@ const char* getStarfieldFragmentShaderSource()
         "}";
 }
 
+const char* getShootingStarVertexShader() {
+    return
+        "#version 330 core\n"
+        "layout (location = 0) in vec3 aPos;\n"
+        "uniform mat4 viewMatrix;\n"
+        "uniform mat4 projectionMatrix;\n"
+        "void main() {\n"
+        "   gl_Position = projectionMatrix * viewMatrix * vec4(aPos, 1.0);\n"
+        "}";
+}
+
+const char* getShootingStarFragmentShader() {
+    return
+        "#version 330 core\n"
+        "out vec4 FragColor;\n"
+        "uniform vec3 starColor;\n"
+        "uniform float alpha;\n"
+        "void main() {\n"
+        "   FragColor = vec4(starColor, alpha);\n"
+        "}";
+}
+
 int compileShader(GLenum type, const char* source)
 {
     int shader = glCreateShader(type);
@@ -283,6 +322,35 @@ void createStarfield(int& shaderProgram)
     glEnableVertexAttribArray(2);
     
     starfieldVertexCount = STAR_COUNT;
+}
+
+void initShootingStars() {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> posDist(-100.0f, 100.0f);
+    std::uniform_real_distribution<> dirDist(-1.0f, 1.0f);
+    std::uniform_real_distribution<> lifeDist(2.0f, 5.0f);
+    std::uniform_real_distribution<> colorDist(0.7f, 1.0f);
+
+    for (int i = 0; i < SHOOTING_STAR_COUNT; ++i) {
+        ShootingStar star;
+        star.position = vec3(posDist(gen), posDist(gen), posDist(gen));
+        star.direction = normalize(vec3(dirDist(gen), dirDist(gen), dirDist(gen)));
+        star.color = vec3(colorDist(gen), colorDist(gen)*0.6f, 0.3f);  // Orange/white
+        star.speed = SHOOTING_STAR_SPEED * (0.8f + 0.4f * dirDist(gen));
+        star.maxLifetime = lifeDist(gen);
+        star.lifetime = 0.0f;
+        shootingStars.push_back(star);
+    }
+
+    glGenVertexArrays(1, &shootingStarVAO);
+    glGenBuffers(1, &shootingStarVBO);
+    glBindVertexArray(shootingStarVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, shootingStarVBO);
+
+    glBufferData(GL_ARRAY_BUFFER, SHOOTING_STAR_COUNT * 2 * 3 * sizeof(float), NULL, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
 }
 
 GLuint loadTexture(const char* filename) {
@@ -429,6 +497,40 @@ int createOrbitVBO(vector<vec3>& orbitVertices)
     return VAO;
 }
 
+vector<float> createRing(float innerRadius, float outerRadius, vec3 color) {
+    vector<float> vertices;
+    const int segments = 60;
+    
+    for (int i = 0; i < segments; ++i) {
+        float angle1 = ((float)i / segments) * 2.0f * M_PI;
+        float angle2 = ((float)(i + 1) / segments) * 2.0f * M_PI;
+        
+        vec3 v1(outerRadius * cos(angle1), 0.0f, outerRadius * sin(angle1));
+        vec3 v2(innerRadius * cos(angle1), 0.0f, innerRadius * sin(angle1));
+        vec3 v3(outerRadius * cos(angle2), 0.0f, outerRadius * sin(angle2));
+        vec3 v4(innerRadius * cos(angle2), 0.0f, innerRadius * sin(angle2));
+        
+        vec3 normal(0.0f, 1.0f, 0.0f);
+        
+        vec2 t1((float)i / segments, 1.0f);
+        vec2 t2((float)i / segments, 0.0f);
+        vec2 t3((float)(i + 1) / segments, 1.0f);
+        vec2 t4((float)(i + 1) / segments, 0.0f);
+        
+        // First triangle
+        vertices.insert(vertices.end(), {v1.x, v1.y, v1.z, color.x, color.y, color.z, t1.x, t1.y, normal.x, normal.y, normal.z});
+        vertices.insert(vertices.end(), {v2.x, v2.y, v2.z, color.x, color.y, color.z, t2.x, t2.y, normal.x, normal.y, normal.z});
+        vertices.insert(vertices.end(), {v3.x, v3.y, v3.z, color.x, color.y, color.z, t3.x, t3.y, normal.x, normal.y, normal.z});
+        
+        // Second triangle
+        vertices.insert(vertices.end(), {v2.x, v2.y, v2.z, color.x, color.y, color.z, t2.x, t2.y, normal.x, normal.y, normal.z});
+        vertices.insert(vertices.end(), {v4.x, v4.y, v4.z, color.x, color.y, color.z, t4.x, t4.y, normal.x, normal.y, normal.z});
+        vertices.insert(vertices.end(), {v3.x, v3.y, v3.z, color.x, color.y, color.z, t3.x, t3.y, normal.x, normal.y, normal.z});
+    }
+    
+    return vertices;
+}
+
 void setProjectionMatrix(int shaderProgram, mat4 projectionMatrix)
 {
     glUseProgram(shaderProgram);
@@ -448,6 +550,25 @@ void setWorldMatrix(int shaderProgram, mat4 worldMatrix)
     glUseProgram(shaderProgram);
     GLuint worldMatrixLocation = glGetUniformLocation(shaderProgram, "worldMatrix");
     glUniformMatrix4fv(worldMatrixLocation, 1, GL_FALSE, &worldMatrix[0][0]);
+}
+
+void renderShootingStars(int shaderProgram, mat4 viewMatrix, mat4 projectionMatrix) {
+    glUseProgram(shaderProgram);
+    setViewMatrix(shaderProgram, viewMatrix);
+    setProjectionMatrix(shaderProgram, projectionMatrix);
+
+    glBegin(GL_LINES);
+    for (const auto& star : shootingStars) {
+        if (star.lifetime >= star.maxLifetime) continue;
+        
+        float alpha = 1.0f - (star.lifetime / star.maxLifetime);
+        vec3 endPos = star.position - star.direction * SHOOTING_STAR_LENGTH;
+        
+        glColor4f(star.color.r, star.color.g, star.color.b, alpha);
+        glVertex3f(star.position.x, star.position.y, star.position.z);
+        glVertex3f(endPos.x, endPos.y, endPos.z);
+    }
+    glEnd();
 }
 
 class Moon {
@@ -499,14 +620,26 @@ public:
     int vertexCount;
     GLuint textureID;
     vector<Moon> moons;
+    GLuint ringVAO;
+    int ringVertexCount;
+    GLuint ringTextureID;
+    bool hasRings;
     
-    Planet(vec3 c, float r, float orbitRad, float orbitSpd, float rotSpd, GLuint texID) 
+    Planet(vec3 c, float r, float orbitRad, float orbitSpd, float rotSpd, GLuint texID, 
+           bool rings = false, GLuint ringTexID = 0, float ringInner = 0.0f, float ringOuter = 0.0f) 
         : color(c), radius(r), orbitRadius(orbitRad), orbitSpeed(orbitSpd), rotationSpeed(rotSpd), 
-          currentOrbitAngle(0.0f), currentRotationAngle(0.0f), textureID(texID) {
+          currentOrbitAngle(0.0f), currentRotationAngle(0.0f), textureID(texID),
+          hasRings(rings), ringTextureID(ringTexID) {
         
         vector<float> vertices = createTexturedSphere(radius, color);
         VAO = createTexturedSphereVBO(vertices);
         vertexCount = vertices.size() / 11;
+        
+        if (hasRings) {
+            vector<float> ringVertices = createRing(ringInner, ringOuter, vec3(1.0f));
+            ringVAO = createTexturedSphereVBO(ringVertices);
+            ringVertexCount = ringVertices.size() / 11;
+        }
     }
     
     void addMoon(const Moon& moon) {
@@ -544,6 +677,17 @@ public:
         glBindVertexArray(VAO);
         glDrawArrays(GL_TRIANGLES, 0, vertexCount);
         
+                if (hasRings) {
+            setWorldMatrix(shaderProgram, planetMatrix);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, ringTextureID);
+            glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
+            glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 1);
+            glUniform1i(glGetUniformLocation(shaderProgram, "useLighting"), 1);
+            glBindVertexArray(ringVAO);
+            glDrawArrays(GL_TRIANGLES, 0, ringVertexCount);
+        }
+
         for (auto& moon : moons) {
             mat4 moonMatrix = planetMatrix * moon.getWorldMatrix();
             setWorldMatrix(shaderProgram, moonMatrix);
@@ -560,6 +704,53 @@ public:
         }
     }
 };
+
+void updateShootingStars(float deltaTime) {
+    static float timeSinceLastSpawn = 0.0f;
+    timeSinceLastSpawn += deltaTime;
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> posDist(-100.0f, 100.0f);
+    std::uniform_real_distribution<> dirDist(-1.0f, 1.0f);
+    std::uniform_real_distribution<> lifeDist(2.0f, 5.0f);
+    std::uniform_real_distribution<> colorDist(0.7f, 1.0f);
+
+    vector<float> vertices;
+    
+    shootingStars.erase(
+        std::remove_if(shootingStars.begin(), shootingStars.end(),
+            [](const ShootingStar& star) { return star.lifetime >= star.maxLifetime; }),
+        shootingStars.end());
+
+    for (auto& star : shootingStars) {
+        star.position += star.direction * star.speed * deltaTime;
+        star.lifetime += deltaTime;
+        
+        vec3 endPos = star.position - star.direction * SHOOTING_STAR_LENGTH;
+        vertices.insert(vertices.end(), {star.position.x, star.position.y, star.position.z});
+        vertices.insert(vertices.end(), {endPos.x, endPos.y, endPos.z});
+    }
+
+    if (shootingStars.size() < SHOOTING_STAR_COUNT && 
+        timeSinceLastSpawn > (1.0f/SHOOTING_STAR_COUNT)) {
+        
+        ShootingStar newStar;
+        newStar.position = vec3(posDist(gen), posDist(gen), posDist(gen));
+        newStar.direction = normalize(vec3(dirDist(gen), dirDist(gen), dirDist(gen)));
+        newStar.color = vec3(colorDist(gen), colorDist(gen)*0.6f, 0.3f);
+        newStar.speed = SHOOTING_STAR_SPEED * (0.8f + 0.4f * dirDist(gen));
+        newStar.maxLifetime = lifeDist(gen);
+        newStar.lifetime = 0;
+        shootingStars.push_back(newStar);
+        timeSinceLastSpawn = 0.0f;
+    }
+
+    if (!vertices.empty()) {
+        glBindBuffer(GL_ARRAY_BUFFER, shootingStarVBO);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(float), vertices.data());
+    }
+}
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 {
@@ -671,6 +862,8 @@ int main(int argc, char*argv[])
     int shaderProgram = compileAndLinkShaders(getVertexShaderSource(), getFragmentShaderSource());
     int starfieldShaderProgram;
     createStarfield(starfieldShaderProgram);
+    initShootingStars();
+    int shootingStarShader = compileAndLinkShaders(getShootingStarVertexShader(), getShootingStarFragmentShader());
     
     sunTexture = loadTexture("textures/sun.jpg");
     mercuryTexture = loadTexture("textures/mercury.jpg");
@@ -682,6 +875,7 @@ int main(int argc, char*argv[])
     uranusTexture = loadTexture("textures/uranus.jpg");
     neptuneTexture = loadTexture("textures/neptune.jpg");
     moonTexture = loadTexture("textures/moon.jpg");
+    ringTexture = loadTexture("textures/rings.jpg");
     
     vector<float> sunVertices = createTexturedSphere(3.0f, vec3(1.0f, 0.95f, 0.7f));
     GLuint sunVAO = createTexturedSphereVBO(sunVertices);
@@ -693,7 +887,8 @@ int main(int argc, char*argv[])
     planets.push_back(Planet(vec3(0.2f, 0.6f, 1.0f), 1.0f, 26.0f, 0.3f, 2.0f, earthTexture));      // Earth
     planets.push_back(Planet(vec3(0.8f, 0.3f, 0.1f), 0.53f, 34.0f, 0.25f, 1.8f, marsTexture));     // Mars
     planets.push_back(Planet(vec3(0.9f, 0.7f, 0.5f), 2.5f, 50.0f, 0.15f, 1.2f, jupiterTexture));   // Jupiter
-    planets.push_back(Planet(vec3(0.8f, 0.6f, 0.4f), 2.0f, 70.0f, 0.1f, 1.0f, saturnTexture));     // Saturn
+    planets.push_back(Planet(vec3(0.8f, 0.6f, 0.4f), 2.0f, 70.0f, 0.1f, 1.0f, saturnTexture, 
+                       true, ringTexture, 2.5f, 4.0f));   
     planets.push_back(Planet(vec3(0.6f, 0.8f, 1.0f), 1.2f, 90.0f, 0.075f, 0.8f, uranusTexture));   // Uranus
     planets.push_back(Planet(vec3(0.2f, 0.4f, 0.8f), 1.2f, 110.0f, 0.05f, 0.7f, neptuneTexture));  // Neptune
     
@@ -724,7 +919,7 @@ int main(int argc, char*argv[])
         orbitVertexCounts.push_back(orbitVertices.size() / 2);
     }
     
-    mat4 projectionMatrix = perspective(radians(45.0f), (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT, 0.1f, 250.0f);
+    mat4 projectionMatrix = perspective(radians(45.0f), (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT, 0.1f, 5000.0f);
     setProjectionMatrix(shaderProgram, projectionMatrix);
     setProjectionMatrix(starfieldShaderProgram, projectionMatrix);
     
@@ -735,6 +930,8 @@ int main(int argc, char*argv[])
         lastFrame = currentFrame;
         
         processInput(window);
+
+        updateShootingStars(deltaTime);
         
         glClearColor(0.0f, 0.0f, 0.05f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -745,6 +942,20 @@ int main(int argc, char*argv[])
         setViewMatrix(starfieldShaderProgram, viewMatrix);
         glBindVertexArray(starfieldVAO);
         glDrawArrays(GL_POINTS, 0, starfieldVertexCount);
+
+        glUseProgram(shootingStarShader);
+        setViewMatrix(shootingStarShader, viewMatrix);
+        setProjectionMatrix(shootingStarShader, projectionMatrix);
+    
+        glBindVertexArray(shootingStarVAO);
+        for (const auto& star : shootingStars) {
+            if (star.lifetime < star.maxLifetime) {
+                float alpha = 1.0f - (star.lifetime / star.maxLifetime);
+                glUniform3fv(glGetUniformLocation(shootingStarShader, "starColor"), 1, &star.color[0]);
+                glUniform1f(glGetUniformLocation(shootingStarShader, "alpha"), alpha);
+                glDrawArrays(GL_LINES, 0, SHOOTING_STAR_COUNT * 2);  // Draw one line segment
+            }
+        }
         
         glUseProgram(shaderProgram);
         setViewMatrix(shaderProgram, viewMatrix);
