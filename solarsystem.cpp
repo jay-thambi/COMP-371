@@ -124,38 +124,17 @@ uniform vec3 Kd; // diffuse
 uniform vec3 Ks; // spec
 uniform float shininess;
 
-// Directional light (dynamic)
-uniform vec3 lightDir;   // direction of light rays (pointing FROM light)
+// Simple sun lighting from origin
+uniform vec3 sunPosition; // position of the sun (origin)
 uniform vec3 lightColor;
 
-// Shadow mapping
-uniform bool useShadows;
-uniform sampler2D shadowMap;
-uniform mat4 lightSpaceMatrix;
-
-float shadowFactor(vec3 worldPos, vec3 normal){
-    if(!useShadows) return 0.0;
-
-    vec4 lsp = lightSpaceMatrix * vec4(worldPos,1.0);
-    vec3 proj = lsp.xyz / lsp.w;
-    proj = proj * 0.5 + 0.5;
-
-    if(proj.z > 1.0) return 0.0;
-
-    // bias against acne (angle-dependent)
-    float bias = max(0.0008 * (1.0 - max(dot(normal, -normalize(lightDir)), 0.0)), 0.0004);
-
-    // PCF 3x3
-    float texel = 1.0 / float(textureSize(shadowMap,0).x);
-    float shadow = 0.0;
-    for(int x=-1; x<=1; ++x)
-    for(int y=-1; y<=1; ++y){
-        float closest = texture(shadowMap, proj.xy + vec2(x,y)*texel).r;
-        shadow += (proj.z - bias) > closest ? 1.0 : 0.0;
-    }
-    shadow /= 9.0;
-    return clamp(shadow,0.0,1.0);
-}
+// Earth shadow for moon
+uniform bool isMoon;
+uniform bool isEarth;
+uniform vec3 earthPosition;
+uniform vec3 moonPosition;
+uniform float earthRadius;
+uniform float moonRadius;
 
 void main(){
     // emissive Sun
@@ -176,8 +155,58 @@ void main(){
 
     vec3 N = normalize(vNormal);
     vec3 V = normalize(viewPos - vWorldPos);
-    vec3 L = normalize(-lightDir); // convert direction to vector towards light
+    vec3 L = normalize(sunPosition - vWorldPos); // vector from surface to sun at origin
     float ndotl = max(dot(N,L),0.0);
+
+    // Check for Earth shadow on moon AND moon shadow on Earth
+    float earthShadow = 0.0;
+    float moonShadow = 0.0;
+    
+    if(isMoon){
+        // Moon being shadowed by Earth (lunar eclipse)
+        vec3 sunToMoon = vWorldPos - sunPosition;
+        vec3 sunToEarth = earthPosition - sunPosition;
+        
+        float sunMoonDist = length(sunToMoon);
+        float sunEarthDist = length(sunToEarth);
+        
+        if(sunMoonDist > sunEarthDist){
+            vec3 sunToEarthNorm = normalize(sunToEarth);
+            float projectionLength = dot(sunToMoon, sunToEarthNorm);
+            vec3 closestPointOnLine = sunPosition + sunToEarthNorm * projectionLength;
+            
+            float distanceToLine = length(vWorldPos - closestPointOnLine);
+            
+            float shadowRadius = earthRadius * 1.2;
+            if(distanceToLine < shadowRadius){
+                float shadowStrength = 1.0 - (distanceToLine / shadowRadius);
+                earthShadow = shadowStrength * shadowStrength;
+            }
+        }
+    }
+    
+    if(isEarth){
+        // Earth being shadowed by moon (solar eclipse)
+        vec3 sunToEarth = vWorldPos - sunPosition;
+        vec3 sunToMoon = moonPosition - sunPosition;
+        
+        float sunEarthDist = length(sunToEarth);
+        float sunMoonDist = length(sunToMoon);
+        
+        if(sunEarthDist > sunMoonDist){
+            vec3 sunToMoonNorm = normalize(sunToMoon);
+            float projectionLength = dot(sunToEarth, sunToMoonNorm);
+            vec3 closestPointOnLine = sunPosition + sunToMoonNorm * projectionLength;
+            
+            float distanceToLine = length(vWorldPos - closestPointOnLine);
+            
+            float shadowRadius = moonRadius * 2.0; // Moon casts smaller shadow
+            if(distanceToLine < shadowRadius){
+                float shadowStrength = 1.0 - (distanceToLine / shadowRadius);
+                moonShadow = shadowStrength * shadowStrength;
+            }
+        }
+    }
 
     vec3 ambient  = Ka * lightColor;
     vec3 diffuse  = Kd * lightColor * ndotl;
@@ -185,8 +214,9 @@ void main(){
     float specPow = pow(max(dot(V,R),0.0), shininess);
     vec3 specular = Ks * lightColor * specPow;
 
-    float sh = shadowFactor(vWorldPos, N);
-    vec3 lighting = ambient + (1.0 - sh)*(diffuse + specular);
+    // Apply shadows to diffuse and specular (keep some ambient)
+    float totalShadow = max(earthShadow, moonShadow);
+    vec3 lighting = ambient + (1.0 - totalShadow) * (diffuse + specular);
 
     FragColor = vec4(base * lighting, 1.0);
 }
@@ -238,20 +268,6 @@ out vec4 FragColor;
 uniform vec3 starColor;
 uniform float alpha;
 void main(){ FragColor = vec4(starColor, alpha); }
-)GLSL";
-
-const char* VS_DEPTH = R"GLSL(
-#version 330 core
-layout(location=0) in vec3 aPos;
-uniform mat4 worldMatrix;
-uniform mat4 lightSpaceMatrix;
-void main(){
-    gl_Position = lightSpaceMatrix * worldMatrix * vec4(aPos,1.0);
-}
-)GLSL";
-const char* FS_DEPTH = R"GLSL(
-#version 330 core
-void main(){}
 )GLSL";
 
 void setProjectionMatrix(int program, mat4 P){
@@ -573,28 +589,9 @@ public:
     }
 };
 
-struct ShadowMap {
-    GLuint FBO=0, depthTex=0; int size=2048;
-    void init(int res=2048){
-        size=res; glGenFramebuffers(1,&FBO);
-        glGenTextures(1,&depthTex);
-        glBindTexture(GL_TEXTURE_2D, depthTex);
-        glTexImage2D(GL_TEXTURE_2D,0,GL_DEPTH_COMPONENT,size,size,0,GL_DEPTH_COMPONENT,GL_FLOAT,nullptr);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_BORDER);
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_BORDER);
-        float border[4]={1,1,1,1}; glTexParameterfv(GL_TEXTURE_2D,GL_TEXTURE_BORDER_COLOR,border);
-        glBindFramebuffer(GL_FRAMEBUFFER,FBO);
-        glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,depthTex,0);
-        glDrawBuffer(GL_NONE); glReadBuffer(GL_NONE);
-        glBindFramebuffer(GL_FRAMEBUFFER,0);
-    }
-} gShadow;
-
 int selectedTarget = 2;
 bool followMode = false;
-bool spotlightOn = false;
+bool sunLightingOn = true;
 bool isFullscreen = false;
 int currentWindowWidth = WINDOW_WIDTH;
 int currentWindowHeight = WINDOW_HEIGHT;
@@ -612,7 +609,7 @@ void mouse_callback(GLFWwindow*, double xpos, double ypos){
     lastX=xpos; lastY=ypos;
     float sens=0.1f; xoff*=sens; yoff*=sens;
     yaw += xoff; pitch += yoff;
-    pitch = clamp(pitch, -89.0f, 89.0f);
+    pitch = glm::clamp(pitch, -89.0f, 89.0f);
     vec3 f; f.x = cos(radians(yaw))*cos(radians(pitch));
     f.y = sin(radians(pitch));
     f.z = sin(radians(yaw))*cos(radians(pitch));
@@ -626,8 +623,8 @@ void processInput(GLFWwindow *w){
     if(glfwGetKey(w,GLFW_KEY_MINUS)==GLFW_PRESS) orbitSpeedMultiplier = std::max(0.01f, orbitSpeedMultiplier-0.2f*deltaTime*10.f);
     if(glfwGetKey(w,GLFW_KEY_EQUAL)==GLFW_PRESS) orbitSpeedMultiplier = std::min(5.0f, orbitSpeedMultiplier+0.2f*deltaTime*10.f);
 
-    if(glfwGetKey(w,GLFW_KEY_L)==GLFW_PRESS) spotlightOn = true;
-    if(glfwGetKey(w,GLFW_KEY_K)==GLFW_PRESS) spotlightOn = false;
+    if(glfwGetKey(w,GLFW_KEY_L)==GLFW_PRESS) sunLightingOn = true;
+    if(glfwGetKey(w,GLFW_KEY_K)==GLFW_PRESS) sunLightingOn = false;
 
     if(glfwGetKey(w,GLFW_KEY_F)==GLFW_PRESS) followMode = true;
     if(glfwGetKey(w,GLFW_KEY_G)==GLFW_PRESS) followMode = false;
@@ -689,7 +686,6 @@ int main(){
     int progMain = linkProgram(VS_MAIN, FS_MAIN);
     int progStar = linkProgram(VS_STAR, FS_STAR);
     int progShoot= linkProgram(VS_SHOOT, FS_SHOOT);
-    int progDepth= linkProgram(VS_DEPTH, FS_DEPTH);
 
     createStarfield(progStar);
     initShootingStars();
@@ -735,8 +731,6 @@ int main(){
         orbitCounts.push_back((int)ov.size()/2);
     }
 
-    gShadow.init(2048);
-
     mat4 P = perspective(radians(45.0f),(float)currentWindowWidth/(float)currentWindowHeight,0.1f,5000.0f);
     setProjectionMatrix(progMain,P);
     setProjectionMatrix(progStar,P);
@@ -747,6 +741,7 @@ int main(){
         ship = makeFallbackShip();
     vec3 shipPos = vec3(0.0f, 3.0f, 30.0f);
     float shipYaw = 0.0f;
+    float shipOrbitAngle = 0.0f;
 
     while(!glfwWindowShouldClose(win)){
         float t = (float)glfwGetTime();
@@ -782,50 +777,11 @@ int main(){
             V = lookAt(cameraPosition, cameraPosition + cameraFront, cameraUp);
         }
 
-        vec3 lightDir = normalize(vec3(sin(t*0.3f), 0.75f, cos(t*0.3f)));
-        vec3 lightColor = vec3(1.0f,1.0f,0.9f);
+        // Simple sun lighting from origin (no shadows)
+        vec3 sunPosition = vec3(0.0f, 0.0f, 0.0f); // sun at origin
+        vec3 lightColor = vec3(1.0f, 1.0f, 0.9f);
 
-        mat4 Lview = lookAt(-lightDir*160.0f, vec3(0), vec3(0,1,0));
-        mat4 Lproj = ortho(-150.f,150.f,-150.f,150.f, 1.f, 400.f);
-        mat4 Lspace = Lproj * Lview;
-
-        glViewport(0,0,gShadow.size,gShadow.size);
-        glBindFramebuffer(GL_FRAMEBUFFER,gShadow.FBO);
-        glClear(GL_DEPTH_BUFFER_BIT);
-        glCullFace(GL_FRONT); 
-
-        glUseProgram(progDepth);
-        glUniformMatrix4fv(glGetUniformLocation(progDepth,"lightSpaceMatrix"),1,GL_FALSE,&Lspace[0][0]);
-
-        auto drawDepthSphereVAO = [&](GLuint vao, int count, const mat4& M){
-            glUniformMatrix4fv(glGetUniformLocation(progDepth,"worldMatrix"),1,GL_FALSE,&M[0][0]);
-            glBindVertexArray(vao);
-            glDrawArrays(GL_TRIANGLES,0,count);
-        };
-        auto drawDepthMesh = [&](Mesh& m, const mat4& M){
-            glUniformMatrix4fv(glGetUniformLocation(progDepth,"worldMatrix"),1,GL_FALSE,&M[0][0]);
-            m.drawElements();
-        };
-
-        for(auto& p: planets){
-            mat4 Mp = p.getWorldMatrix();
-            drawDepthSphereVAO(p.VAO, p.vertexCount, Mp);
-            if(p.hasRings){
-                drawDepthSphereVAO(p.ringVAO, p.ringVertexCount, Mp);
-            }
-            for(auto& m: p.moons){
-                mat4 Mm = Mp * m.getWorldMatrix();
-                drawDepthSphereVAO(m.VAO, m.vertexCount, Mm);
-            }
-        }
-        {
-            mat4 M = translate(mat4(1), shipPos) * rotate(mat4(1), shipYaw, vec3(0,1,0)) * scale(mat4(1), vec3(2.0f));
-            drawDepthMesh(ship, M);
-        }
-
-        glCullFace(GL_BACK);
-        glBindFramebuffer(GL_FRAMEBUFFER,0);
-
+        // Skip shadow mapping entirely
         glViewport(0,0,currentWindowWidth,currentWindowHeight);
         glClearColor(0.0f,0.0f,0.05f,1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -850,14 +806,26 @@ int main(){
         setProjectionMatrix(progMain, P);
 
         glUniform3fv(glGetUniformLocation(progMain,"viewPos"),1,&cameraPosition[0]);
-        glUniform3fv(glGetUniformLocation(progMain,"lightDir"),1,&lightDir[0]);
+        glUniform3fv(glGetUniformLocation(progMain,"sunPosition"),1,&sunPosition[0]);
         glUniform3fv(glGetUniformLocation(progMain,"lightColor"),1,&lightColor[0]);
-        glUniform1i(glGetUniformLocation(progMain,"useShadows"), 1);
-        glUniformMatrix4fv(glGetUniformLocation(progMain,"lightSpaceMatrix"),1,GL_FALSE,&Lspace[0][0]);
 
-        glActiveTexture(GL_TEXTURE5);
-        glBindTexture(GL_TEXTURE_2D, gShadow.depthTex);
-        glUniform1i(glGetUniformLocation(progMain,"shadowMap"),5);
+        // Get Earth position for moon shadowing (Earth is planets[2])
+        vec3 earthPos = vec3(0.0f);
+        vec3 moonPos = vec3(0.0f);
+        if(planets.size() > 2){
+            mat4 earthMatrix = planets[2].getWorldMatrix();
+            earthPos = vec3(earthMatrix[3]);
+            
+            // Get Earth's moon position (first moon of Earth)
+            if(!planets[2].moons.empty()){
+                mat4 moonMatrix = earthMatrix * planets[2].moons[0].getWorldMatrix();
+                moonPos = vec3(moonMatrix[3]);
+            }
+        }
+        glUniform3fv(glGetUniformLocation(progMain,"earthPosition"),1,&earthPos[0]);
+        glUniform3fv(glGetUniformLocation(progMain,"moonPosition"),1,&moonPos[0]);
+        glUniform1f(glGetUniformLocation(progMain,"earthRadius"), 1.0f); // Earth radius
+        glUniform1f(glGetUniformLocation(progMain,"moonRadius"), 0.27f); // Moon radius
 
         setWorldMatrix(progMain, mat4(1));
         glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, sunTexture);
@@ -865,6 +833,8 @@ int main(){
         glUniform1i(glGetUniformLocation(progMain,"useTexture"), 1);
         glUniform1i(glGetUniformLocation(progMain,"isSun"), 1);
         glUniform1i(glGetUniformLocation(progMain,"useLighting"), 0);
+        glUniform1i(glGetUniformLocation(progMain,"isMoon"), 0);
+        glUniform1i(glGetUniformLocation(progMain,"isEarth"), 0);
         glUniform3f(glGetUniformLocation(progMain,"Ka"),0.0,0.0,0.0);
         glUniform3f(glGetUniformLocation(progMain,"Kd"),1.0,1.0,1.0);
         glUniform3f(glGetUniformLocation(progMain,"Ks"),0.0,0.0,0.0);
@@ -876,13 +846,15 @@ int main(){
         glUniform1i(glGetUniformLocation(progMain,"useTexture"), 0);
         glUniform1i(glGetUniformLocation(progMain,"useLighting"),0);
         glUniform1i(glGetUniformLocation(progMain,"isSun"),0);
+        glUniform1i(glGetUniformLocation(progMain,"isMoon"),0);
+        glUniform1i(glGetUniformLocation(progMain,"isEarth"),0);
         for(size_t i=0;i<orbitVAOs.size();++i){
             setWorldMatrix(progMain, mat4(1));
             glBindVertexArray(orbitVAOs[i]);
             glDrawArrays(GL_LINE_LOOP,0,orbitCounts[i]);
         }
 
-        glUniform1i(glGetUniformLocation(progMain,"useLighting"),1);
+        glUniform1i(glGetUniformLocation(progMain,"useLighting"),sunLightingOn ? 1 : 0);
         glUniform3f(glGetUniformLocation(progMain,"Ka"),0.05f,0.05f,0.05f);
         glUniform3f(glGetUniformLocation(progMain,"Kd"),0.9f,0.9f,0.9f);
         glUniform3f(glGetUniformLocation(progMain,"Ks"),0.2f,0.2f,0.2f);
@@ -898,6 +870,11 @@ int main(){
             glUniform1i(glGetUniformLocation(progMain,"texture1"),0);
             glUniform1i(glGetUniformLocation(progMain,"useTexture"),1);
             glUniform1i(glGetUniformLocation(progMain,"isSun"),0);
+            glUniform1i(glGetUniformLocation(progMain,"isMoon"),0);
+            
+            // Check if this is Earth (planets[2])
+            bool currentIsEarth = (&p == &planets[2]);
+            glUniform1i(glGetUniformLocation(progMain,"isEarth"), currentIsEarth ? 1 : 0);
 
             glBindVertexArray(p.VAO);
             glDrawArrays(GL_TRIANGLES,0,p.vertexCount);
@@ -920,13 +897,20 @@ int main(){
                 glUniform1i(glGetUniformLocation(progMain,"texture1"),0);
                 glUniform1i(glGetUniformLocation(progMain,"useTexture"),1);
                 glUniform1i(glGetUniformLocation(progMain,"isSun"),0);
+                glUniform1i(glGetUniformLocation(progMain,"isMoon"),1); // This is a moon
+                glUniform1i(glGetUniformLocation(progMain,"isEarth"),0);
                 glBindVertexArray(m.VAO);
                 glDrawArrays(GL_TRIANGLES,0,m.vertexCount);
             }
         }
 
         {
-            mat4 M = translate(mat4(1), shipPos) * rotate(mat4(1), shipYaw, vec3(0,1,0)) * scale(mat4(1), vec3(2.0f));
+            // Spacecraft follows a circular orbit around the sun
+            float shipOrbitRadius = 35.0f;
+            shipOrbitAngle += 0.2f * deltaTime; // Orbital speed
+            shipPos = vec3(shipOrbitRadius * cos(shipOrbitAngle), 3.0f + 2.0f * sin(shipOrbitAngle * 2.0f), shipOrbitRadius * sin(shipOrbitAngle));
+            
+            mat4 M = translate(mat4(1), shipPos) * rotate(mat4(1), shipYaw, vec3(0,1,0)) * scale(mat4(1), vec3(1.2f));
             setWorldMatrix(progMain, M);
             glUniform1i(glGetUniformLocation(progMain,"useTexture"),0);
             glUniform3f(glGetUniformLocation(progMain,"Ka"),0.08f,0.08f,0.10f);
@@ -936,8 +920,6 @@ int main(){
             ship.drawElements();
 
             shipYaw += 0.2f*deltaTime;
-            shipPos += vec3(0.0f, 0.0f, -5.0f*deltaTime);
-            if(shipPos.z < -120.0f) shipPos.z = 120.0f;
         }
 
         glfwSwapBuffers(win);
