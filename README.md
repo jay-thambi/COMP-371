@@ -6,28 +6,68 @@
 - Sanjay Thambithurai (40184405)
 - Harun Slahaldin Omar (40250981)
 
-## Description
+## Project Overview & Features
 
-This is a complete 3D solar system simulation featuring:
+A 3D solar system simulation built with OpenGL 3.3 featuring realistic planetary motion and interactive controls.
 
-- A central star (Sun) with texture
-- Planets of the solar system with orbital motion and textures
-- **Hierarchical Animation**: Moons orbiting planets (2-level deep hierarchy)
-- Interactive camera controls with relative movement
-- Realistic relative sizes and orbital speeds
-- Multiple textured surfaces with different textures
-- Advanced OpenGL features with shader-based rendering
+**Core Features:**
 
-## Camera Controls
+- 8 planets orbiting the sun with individual textures and realistic relative speeds
+- Hierarchical animation system (Sun → Planet → Moon) with multiple moons per planet
+- Phong lighting model with ambient, diffuse, and specular components
+- Eclipse system with shadow calculations for Earth-Moon interactions
+- Interactive camera with free movement and planet-following modes
 
-- **Mouse**: Look around (camera rotation)
+**Visual Effects:**
+
+- 50,000 procedurally generated stars with realistic colors and brightness
+- Animated shooting stars with particle trail effects
+- Saturn's textured ring system
+- Orbiting spacecraft with OBJ model loading
+- Sun glow effects and lighting toggle
+
+**Straight-Forward Controls:**
+
+- Mouse and keyboard camera controls (WASD + mouse look)
+- Planet selection and follow mode (F key + 1-8 number keys)
+- Lighting toggle (L/K keys) and animation controls (P for pause, +/- for speed)
+- Fullscreen mode (F11) and speed boost (Shift)
+
+## Complete Controls Guide
+
+### Camera Movement (Free Mode Only)
+
+- **Mouse**: Look around (camera rotation) - disabled in follow mode
 - **W**: Move forward
 - **S**: Move backward
-- **A**: Move left
-- **D**: Move right
-- **Shift**: Speed Up Movement 300%
-- **CTRL**: Slow orbit to 10%
+- **A**: Move left (strafe)
+- **D**: Move right (strafe)
+- **Q**: Move up
+- **E**: Move down
+- **Shift + Movement**: 5x speed boost for camera movement
 - **ESC**: Exit application
+
+### Camera Modes
+
+- **F**: Enable follow mode (orbiting camera around selected planet)
+- **G**: Disable follow mode (return to free camera)
+- **1-8**: Select planet to follow (1=Mercury, 2=Venus, 3=Earth, etc.)
+
+### Lighting Controls
+
+- **L**: Turn ON sun lighting (Phong model lighting)
+- **K**: Turn OFF sun lighting (see planets without lighting)
+
+### Animation Controls
+
+- **P**: Pause all planetary orbits and rotations
+- **O**: Resume orbital motion
+- **- (Minus)**: Decrease orbit speed multiplier
+- **= (Plus/Equal)**: Increase orbit speed multiplier
+
+### Display Controls
+
+- **F11**: Toggle fullscreen mode
 
 ## Build Instructions
 
@@ -36,29 +76,3 @@ This is a complete 3D solar system simulation featuring:
 3. Open `solarsystem.cpp`
 4. Run the C++ program
 5. Run the generated executable
-
-## Features Implemented
-
-**Complete Assignment Requirements:**
-- Real-time 3D interactive application using OpenGL
-- Interactive camera with mouse + keyboard controls (flying/walking style)
-- Multiple textured surfaces with different textures
-- Hierarchical animation (sun→planet→moon, 2 levels deep)
-- Advanced OpenGL features with shader-based rendering
-
-## Solar System Details
-
-**Sun**: Central star with yellow texture
-**Planets**: Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune with unique textures
-**Moons**: 
-- Earth: 1 moon
-- Mars: 2 moons (Phobos, Deimos)
-- Jupiter: 4 Galilean moons
-
-## Technical Features
-
-- Texture mapping with stb_image.h
-- Hierarchical transformations for orbital mechanics
-- Fragment and vertex shaders with texture support
-- Realistic relative planet sizes and orbital speeds
-- Smooth camera controls with speed boost (Shift key)
